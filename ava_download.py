@@ -13,7 +13,7 @@ import requests
 import os
 import json
 import shutil
-import tqdm
+from tqdm import tqdm
 
 logging.basicConfig(level=logging.DEBUG,
                     format='%(asctime)s %(levelname)s %(message)s',
@@ -147,7 +147,7 @@ web_parser = WebParser(wait_second=0, max_retry_time=10)
 
 with open("./data/ava/AVA.txt", 'r') as fin:
     for line in tqdm(fin):
-        while len(get_all_proxy) == 0:
+        while len(get_all_proxy()) == 0:
             logging.info("No avaliable proxy now")
             time.sleep(5*60)
         
