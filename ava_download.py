@@ -14,12 +14,20 @@ import os
 import json
 import shutil
 from tqdm import tqdm
+from multiprocessing import Process, Semaphore, Lock, Queue, Pool, Manager
 
-logging.basicConfig(level=logging.DEBUG,
+logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s %(levelname)s %(message)s',
                     datefmt='%m-%d %H:%M')
 
+server = Manager()
+shared_failed_proxy = server.dict()
+
 def get_proxy():
+    while len(get_all_proxy()) == 0:
+        logging.info("No avaliable proxy now")
+        time.sleep(5*60)
+    
     return requests.get("http://127.0.0.1:5000/get/").content
 
 def get_all_proxy():
@@ -54,15 +62,14 @@ class WebParser(object):
         
         self.MIN_HTML_SIZE = 1024
         self.MAX_FAILED_CNT = 10
-        self.failed_proxy = {}
-        
+    
     def __get_html_response(self, url, valid_size=-1):
         html = None
         for _ in range(self.max_retry_time):
             user_agent = "Mozilla/5.0 (X11; U; Linux x86_64; en-US; rv:1.9.2.24) Gecko/20111109 CentOS/3.6.24-3.el6.centos Firefox/3.6.24"
             headers = {'User-Agent': user_agent}
             proxy = get_proxy()
-            self.failed_proxy.setdefault(proxy, 0)
+            shared_failed_proxy.setdefault(proxy, 0)
             try:
                 html = requests.get(url=url, 
                                     headers=headers, 
@@ -72,10 +79,13 @@ class WebParser(object):
                     html = None
                     raise Exception("Invalid html response!")
             except Exception, e:
-                self.failed_proxy[proxy] += 1
-                logging.error("[proxy]%s failed $d times"%(proxy, self.failed_proxy[proxy]))
+                shared_failed_proxy[proxy] += 1
+                logging.error("[proxy]%s failed %d times"%(proxy, shared_failed_proxy[proxy]))
+                if shared_failed_proxy[proxy] >= self.MAX_FAILED_CNT:
+                    delete_proxy(proxy)
+                    #del shared_failed_proxy[proxy]
             else:
-                self.failed_proxy[proxy] = 0
+                shared_failed_proxy[proxy] = 0
                 break
             finally:
                 time.sleep(self.wait_second)
@@ -136,26 +146,25 @@ class WebParser(object):
             return None
         else:
             return img_container.contents[1].get("src", None)
-        
-    def rm_failed_proxy(self):
-        for proxy, failed_cnt in self.failed_proxy.items():
-            if failed_cnt >= self.MAX_FAILED_CNT:
-                delete_proxy(proxy)
 
-
-web_parser = WebParser(wait_second=0, max_retry_time=10)
-
-with open("./data/ava/AVA.txt", 'r') as fin:
-    for line in tqdm(fin):
-        while len(get_all_proxy()) == 0:
-            logging.info("No avaliable proxy now")
-            time.sleep(5*60)
-        
-        fields = line.strip().split(" ")
-        imgid = fields[1]
-        
-        if web_parser.load_html(imgid):
-            web_parser.save_image()
-            
-        web_parser.rm_failed_proxy()
-
+def Spider(imgid):
+    web_parser = WebParser(wait_second=0, max_retry_time=5)
+    if web_parser.load_html(imgid):
+        web_parser.save_image()
+                
+if __name__ == "__main__":
+    imgid_list = []
+    with open("./data/ava/AVA.txt", 'r') as fin:
+        for line in fin:
+            fields = line.strip().split(" ")
+            if len(fields) < 2:
+                continue
+            imgid = fields[1]
+            imgid_list.append(imgid)
+    
+    p = Pool(processes=64)
+    p.map(Spider, imgid_list)
+    p.close()
+    p.join()
+    
+    logging.info("All Images have been cached.")
