@@ -1,11 +1,8 @@
-
 # coding: utf-8
 
 # ## Pre-requirements
 # 1. 安装[SSDB](https://github.com/jhao104/memory-notes/blob/master/SSDB/SSDB安装配置记录.md) Server并启动服务；
 # 2. 部署[proxy_pool](https://github.com/jhao104/proxy_pool)；注意将配置文件里的DB更改为SSDB，同时修改SSDB的Host和Port；启动proxy_pool
-
-# In[1]:
 
 import urllib2
 from bs4 import BeautifulSoup
@@ -145,8 +142,6 @@ class WebParser(object):
             if failed_cnt >= self.MAX_FAILED_CNT:
                 delete_proxy(proxy)
 
-
-# In[ ]:
 
 web_parser = WebParser(wait_second=0, max_retry_time=10)
 
