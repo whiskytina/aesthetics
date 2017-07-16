@@ -24,9 +24,9 @@ server = Manager()
 shared_failed_proxy = server.dict()
 
 def get_proxy():
-    while len(get_all_proxy()) == 0:
-        logging.info("No avaliable proxy now")
-        time.sleep(5*60)
+    while len(get_all_proxy()) < 64:
+        logging.info("avaliable proxy less than 64")
+        time.sleep(30*60)
     
     return requests.get("http://127.0.0.1:5000/get/").content
 
@@ -44,7 +44,7 @@ def delete_proxy(proxy):
         logging.error("[proxy]%s delete failed"%proxy)
     
 class WebParser(object):
-    def __init__(self, wait_second=1, max_retry_time=10):
+    def __init__(self, wait_second=1, max_retry_time=10, timeout=5):
         self.url_pattern = "http://www.dpchallenge.com/image.php?IMAGE_ID=%s"
         
         self.html_cache_path = "./data/html_cache/"
@@ -59,6 +59,7 @@ class WebParser(object):
         
         self.wait_second = wait_second
         self.max_retry_time = max_retry_time
+        self.timeout = timeout
         
         self.MIN_HTML_SIZE = 1024
         self.MAX_FAILED_CNT = 10
@@ -73,20 +74,21 @@ class WebParser(object):
             try:
                 html = requests.get(url=url, 
                                     headers=headers, 
-                                    proxies={"http": "http://{}".format(proxy)})\
+                                    proxies={"http": "http://{}".format(proxy)},
+                                    timeout=self.timeout)\
                                .content
                 if len(html) < valid_size:
                     html = None
-                    raise Exception("Invalid html response!")
+                    shared_failed_proxy[proxy] += 1
+                    logging.error("[proxy]%s has been blocked for %d times"%(proxy, shared_failed_proxy[proxy]))
+                    if shared_failed_proxy[proxy] >= self.MAX_FAILED_CNT:
+                        delete_proxy(proxy)
+                        shared_failed_proxy[proxy] = 0
+                else:
+                    shared_failed_proxy[proxy] = 0
+                    break
             except Exception, e:
-                shared_failed_proxy[proxy] += 1
-                logging.error("[proxy]%s failed %d times"%(proxy, shared_failed_proxy[proxy]))
-                if shared_failed_proxy[proxy] >= self.MAX_FAILED_CNT:
-                    delete_proxy(proxy)
-                    #del shared_failed_proxy[proxy]
-            else:
-                shared_failed_proxy[proxy] = 0
-                break
+                logging.error("[proxy]%s connection error: %s"%(proxy, str(e)))
             finally:
                 time.sleep(self.wait_second)
         return html
@@ -142,13 +144,13 @@ class WebParser(object):
 
     def get_img_url(self):
         img_container = self.soup.find("td", id="img_container")
-        if img_container is None or len(img_container.contents) < 2:
+        if img_container is None or len(img_container.find_all("img")) < 2:
             return None
         else:
-            return img_container.contents[1].get("src", None)
+            return img_container.find_all("img")[1].get("src", None)
 
 def Spider(imgid):
-    web_parser = WebParser(wait_second=0, max_retry_time=5)
+    web_parser = WebParser(wait_second=0, max_retry_time=10, timeout=10)
     if web_parser.load_html(imgid):
         web_parser.save_image()
                 
@@ -162,7 +164,7 @@ if __name__ == "__main__":
             imgid = fields[1]
             imgid_list.append(imgid)
     
-    p = Pool(processes=64)
+    p = Pool(processes=16)
     p.map(Spider, imgid_list)
     p.close()
     p.join()
